@@ -1,14 +1,14 @@
 #  Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
-#  
+#
 #  Licensed under the Apache License, Version 2.0 (the "License").
 #  You may not use this file except in compliance with the License.
 #  A copy of the License is located at
-#  
+#
 #      http://www.apache.org/licenses/LICENSE-2.0
-#  
-#  or in the "license" file accompanying this file. This file is distributed 
-#  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either 
-#  express or implied. See the License for the specific language governing 
+#
+#  or in the "license" file accompanying this file. This file is distributed
+#  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
+#  express or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
 
 import json
@@ -25,7 +25,9 @@ from tensorflow.core.framework import tensor_pb2
 from tf_container import proxy_client
 from six import StringIO
 import csv
-from container_support.serving import JSON_CONTENT_TYPE, CSV_CONTENT_TYPE, OCTET_STREAM_CONTENT_TYPE, ANY_CONTENT_TYPE
+from container_support.serving import UnsupportedContentTypeError, UnsupportedAcceptTypeError, \
+                                      JSON_CONTENT_TYPE, CSV_CONTENT_TYPE, \
+                                      OCTET_STREAM_CONTENT_TYPE, ANY_CONTENT_TYPE
 from tf_container.run import logger
 import time
 
@@ -50,8 +52,8 @@ def export_saved_model(checkpoint_dir, model_path, s3=boto3.client('s3')):
         except KeyError as e:
             logger.error("Failed to download saved model. File does not exist in {}".format(checkpoint_dir))
             raise e
-
-        saved_model_path = saved_model_path_array[0]
+        # Select most recent saved_model.pb
+        saved_model_path = saved_model_path_array[-1]
 
         variables_path = [x['Key'] for x in contents if 'variables/variables' in x['Key']]
         variable_names_to_paths = {v.split('/').pop(): v for v in variables_path}
@@ -227,19 +229,17 @@ class Transformer(object):
         if accepts == OCTET_STREAM_CONTENT_TYPE:
             return data.SerializeToString()
 
-        raise ValueError('invalid accept type {}'.format(accepts))
+        raise UnsupportedAcceptTypeError('invalid accept type {}'.format(accepts))
 
     def _default_input_fn(self, serialized_data, content_type):
         if content_type == JSON_CONTENT_TYPE:
-            data = self._parse_json_request(serialized_data)
-        elif content_type == CSV_CONTENT_TYPE:
-            data = self._parse_csv_request(serialized_data)
-        elif content_type == OCTET_STREAM_CONTENT_TYPE:
-            data = self.proxy_client.parse_request(serialized_data)
-        else:
-            raise ValueError("Unsupported content-type {}".format(content_type))
+            return self._parse_json_request(serialized_data)
+        if content_type == CSV_CONTENT_TYPE:
+            return self._parse_csv_request(serialized_data)
+        if content_type == OCTET_STREAM_CONTENT_TYPE:
+            return self.proxy_client.parse_request(serialized_data)
 
-        return data
+        raise UnsupportedContentTypeError('Unsupported content-type {}'.format(content_type))
 
     @classmethod
     def from_module(cls, m, grpc_proxy_client):

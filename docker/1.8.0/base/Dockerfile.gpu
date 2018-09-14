@@ -45,8 +45,6 @@ RUN pip --no-cache-dir install \
         Pillow \
         h5py
 
-RUN pip install numpy tensorflow-serving-api==1.5
-
 # Set up grpc
 RUN pip install enum34 futures mock six && \
     pip install --pre 'protobuf>=3.0.0a3' && \
@@ -62,8 +60,8 @@ RUN echo "startup --batch" >>/etc/bazel.bazelrc
 #   https://github.com/bazelbuild/bazel/issues/418
 RUN echo "build --spawn_strategy=standalone --genrule_strategy=standalone" \
     >>/etc/bazel.bazelrc
-# Install the most recent bazel release.
-ENV BAZEL_VERSION 0.8.0
+# Install the most recent bazel release which works: https://github.com/bazelbuild/bazel/issues/4652
+ENV BAZEL_VERSION 0.10.1
 WORKDIR /
 RUN mkdir /bazel && \
     cd /bazel && \
@@ -83,7 +81,12 @@ ENV TF_CUDA_VERSION=9.0
 ENV TF_CUDNN_VERSION=7
 ENV CUDNN_INSTALL_PATH=/usr/lib/x86_64-linux-gnu
 
-ENV TF_SERVING_VERSION=1.5.0
+# TODO: upgrade to tf serving 1.8, which requires more work with updating
+# dependencies. See current work in progress in tfserving-1.8 branch.
+ENV TF_SERVING_VERSION=1.7.0
+
+# Install tensorflow-serving-api
+RUN pip install tensorflow-serving-api==$TF_SERVING_VERSION
 
 # Download TensorFlow Serving
 RUN cd / && git clone --recurse-submodules https://github.com/tensorflow/serving && \
@@ -105,6 +108,11 @@ RUN bazel build -c opt --config=cuda \
     tensorflow_serving/model_servers:tensorflow_model_server && \
     cp bazel-bin/tensorflow_serving/model_servers/tensorflow_model_server /usr/local/bin/ && \
     bazel clean --expunge
+
+# Update libstdc++6, as required by tensorflow-serving >= 1.6: https://github.com/tensorflow/serving/issues/819
+RUN add-apt-repository ppa:ubuntu-toolchain-r/test -y && \
+    apt-get update && \
+    apt-get install -y libstdc++6
 
 # cleaning up the container
 RUN rm -rf /serving && \
